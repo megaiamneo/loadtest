@@ -61,27 +61,29 @@ def _utc_ts_offset_ms(offset_ms: int = 0) -> str:
     return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
 
 
-JAVA_CODE = (
-    'import java.util.Scanner;\n'
-    'public class Main {\n'
-    '    public static void main(String[] args) {\n'
-    '        Scanner sc = new Scanner(System.in);\n'
-    '        int a = sc.nextInt();\n'
-    '        int b = sc.nextInt();\n'
-    '        System.out.println("Sum of x + y = " + (a + b));\n'
-    '    }\n'
-    '}'
-)
+JAVA_CODE = """import java.io.*;
+class Main
+{
+public static void main(String args[])throws Exception
+{
+int x,y,z;
+BufferedReader br= new BufferedReader( new InputStreamReader(System.in));
+x=Integer.parseInt(br.readLine());
+y=Integer.parseInt(br.readLine());
+z = x+y;
+System.out.print("Sum of x + y = "+ z);
+}
+}"""
 
 # SIT MCQ Answer
-MCQ_ANSWER = MCQ_ANSWER = ["<p>12</p>", "<p>18</p>", "<p>36</p>"]
-MCQ_Q_TYPE  = "mcq_multiple_correct"
+MCQ_ANSWER = "<p>7 km</p>"
+MCQ_Q_TYPE  = "mcq_single_correct"
 
 
 # MCQ question IDs from the frozen exam (option-click / clear-answer targets)
 MCQ_QUESTION_IDS = [
     # SIT
-    "69bacc125b8a24ee8d3bef4a"
+    "6a38cdb60fc606252f42643d"
 ]
 
 LOOP_DURATION_SEC  = 300
@@ -94,8 +96,8 @@ def _same_site_headers(token: str) -> dict:
     return {
         **HEADERS_TEMPLATE,
         "Authorization":   f"Bearer {token}",
-        "Origin":          "https://api.iamneo.ai",
-        "Referer":         "https://api.iamneo.ai/",
+        "Origin":          "https://sit.examly.net",
+        "Referer":         "https://sit.examly.net",
         "Priority":        "u=1, i",
         "Sec-Ch-Ua":       '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
         "Sec-Ch-Ua-Mobile":   "?0",
@@ -285,7 +287,7 @@ class ExamBaseUser(HttpUser):
                 r.failure(f"req_id={req_id} HTTP {r.status_code}: {r.text[:200]}")
 
     # ── 5 & 7. /event/heart-beat ─────────────────────────────────
-    def _heartbeat(self, code: str = "", language: str = "Java"):
+    def _heartbeat(self, code: str = "", language: str = "Java21"):
         """POST /event/heart-beat — sends current code/answer state."""
         url = (
             f"/api/v2/assessment/courses/{self.scenario['course_id']}"
@@ -309,7 +311,7 @@ class ExamBaseUser(HttpUser):
                 r.failure(f"req_id={req_id} HTTP {r.status_code}: {r.text[:200]}")
 
     # ── 6. /question/{id}/compile ─────────────────────────────────
-    def _compile(self, code: str, language: str = "Java",
+    def _compile(self, code: str, language: str = "Java21",
                  event_type: str = "Compiled & Run", custom_input: str = ""):
         """POST /compile — submit code for execution."""
         url = (
@@ -360,10 +362,11 @@ class ExamBaseUser(HttpUser):
             f"/tests/{self.scenario['test_id']}/submit"
         )
         payload = {
-            "frozen_data_id": "69da0a00c5729313f1195657",
+            "frozen_data_id": "6a4f488d2a90e73a5ce330d6",
+            "submit_type": "manual",
             "questions": [
                 {
-                    "q_id":   self.scenario["question_id"],
+                    "question_id":   self.scenario["question_id"],
                     "answer": ""
                 }
             ],
@@ -435,15 +438,15 @@ class ExamUser(ExamBaseUser):
 
             # # 5. heart-beat (empty — answer cleared)
             print(f"[FLOW] → heart-beat (empty)")
-            self._heartbeat(code="", language="Java")
+            self._heartbeat(code=JAVA_CODE, language="Java21")
 
             # # 6. compile
             print(f"[FLOW] → compile")
-            self._compile(code=JAVA_CODE, language="Java", event_type="Compiled & Run")
+            self._compile(code=JAVA_CODE, language="Java21", event_type="Compiled & Run")
 
             # # 7. heart-beat (with code — after compile)
             print(f"[FLOW] → heart-beat (with code)")
-            self._heartbeat(code=JAVA_CODE, language="Java")
+            self._heartbeat(code=JAVA_CODE, language="Java21")
 
             # Wait before next iteration (unless we've already exceeded the window)
             remaining = LOOP_DURATION_SEC - (time.time() - loop_start)
@@ -460,6 +463,25 @@ class ExamUser(ExamBaseUser):
         # Stop user after one successful full loop so it won't restart
         print(f"[FLOW] ✓ Session complete for user={uid}. Stopping user.")
         raise StopUser()
+
+class StartOnlyUser(ExamBaseUser):
+    wait_time = between(1, 3)
+    weight = 1
+
+    @task
+    def start_only(self):
+        if self.session_started:
+            raise StopUser()
+        
+        uid = self.scenario["user_id"]
+        if self._start():
+            print(f"[START-ONLY] ✓ user={uid}")
+        else:
+            print(f"[START-ONLY] ✗ user={uid}")
+        
+        self.session_started = True
+        print("[INFO] Session marked as started. Stopping user execution.")
+        raise StopUser()        
 
 
 # ══════════════════════════════════════════════════════════════════
